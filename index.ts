@@ -6,7 +6,7 @@ function getFrontpages(): Promise<string[]> {
   return fetch(WAYBACK_URL + "/frontpages")
     .then((response) => response.json())
     .then((data) => data.map((fp: any) => fp._id))
-    .then((ids) => ids.slice(0, 500));
+    .then((ids) => ids.slice(0, 1000));
 }
 
 function getFrontpageData(id: string): Promise<any> {
