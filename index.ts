@@ -1,31 +1,29 @@
-console.log("Hello via Bun!");
-
 const WAYBACK_URL = "https://newsapp-wayback.private.prod.gcp.dr.dk/api";
 
-function getFrontpages(): Promise<string[]> {
-  return fetch(WAYBACK_URL + "/frontpages")
-    .then((response) => response.json())
-    .then((data) => data.map((fp: any) => fp._id))
-    .then((ids) => ids.slice(0, 1000));
+async function getFrontpages(): Promise<string[]> {
+  const response = await fetch(WAYBACK_URL + "/frontpages");
+  const data = await response.json();
+  return data.map((fp: any) => fp._id);
 }
 
-function getFrontpageData(id: string): Promise<any> {
-  console.log("Fetching frontpage data for id: " + id);
-  return fetch(WAYBACK_URL + "/frontpages/" + id).then((response) =>
-    response.json(),
-  );
+async function getFrontpageData(id: string): Promise<any> {
+  const response = await fetch(WAYBACK_URL + "/frontpages/" + id);
+  return await response.json();
 }
-function mergeFrontpageData(data: any): any {
+function mergeFrontpageData(data: any): any[] {
+  if (!data?.frontPage) {
+    return [];
+  }
   const content = [
-    ...data.frontPage.curatedContentWidget,
-    ...data.frontPage.automatedContentWidget,
+    ...data?.frontPage?.curatedContentWidget,
+    ...data?.frontPage?.automatedContentWidget,
   ];
   return sanitizeData(content);
 }
 
 function findDuplicateKeys(keys: string[]): string[] {
   const seen = new Set();
-  const duplicates = new Set();
+  const duplicates = new Set<string>();
   keys.forEach((key) => {
     if (seen.has(key)) {
       duplicates.add(key);
@@ -40,12 +38,28 @@ async function main() {
   const frontpageIds = await getFrontpages();
   console.log("Frontpage ids:");
   console.log(frontpageIds);
-  const frontPageData = await Promise.all(frontpageIds.map(getFrontpageData));
-  const mergedData = frontPageData.map(mergeFrontpageData);
-  const keys = mergedData.map((data) => data.map(keyExtractor));
-  const duplicates = keys.map(findDuplicateKeys);
-  console.log("Duplicates:");
-  console.log(duplicates.filter((d) => d.length > 0));
+  for (const [i, id] of frontpageIds.entries()) {
+    console.log(`Checking frontpage ${i + 1}/${frontpageIds.length}`);
+    const data = await getFrontpageData(id);
+    const mergedData = mergeFrontpageData(data);
+    const keys = mergedData.map(getKeyExtractorId);
+    const newKeyextractor = mergedData.map(keyExtractor);
+    const duplicates = findDuplicateKeys(keys);
+    const newduplicates = findDuplicateKeys(newKeyextractor);
+    if (duplicates.length > 0 || newduplicates.length > 0) {
+      console.log("Duplicates:");
+      console.log(newduplicates);
+      console.log(duplicates);
+      console.log("id:");
+      console.log(id);
+      return;
+    }
+  }
+  //const mergedData = frontPageData.map(mergeFrontpageData);
+  //const keys = mergedData.map((data) => data.map(getKeyExtractorId));
+  //const duplicates = keys.map(findDuplicateKeys);
+  //console.log("Duplicates:");
+  //console.log(duplicates.filter((d) => d.length > 0));
 }
 
 type ContentItem = any;
@@ -75,7 +89,24 @@ function sanitizeData(data: ContentItem[]) {
     return accumulator;
   }, []);
 }
-
+const getKeyExtractorId = (item: ContentItem, index: number): string => {
+  switch (item.__typename) {
+    case "FrontPageArticle":
+      return index.toString();
+    case "FrontPageWidget":
+      return item.url + index.toString();
+    case "BTeaserGroup":
+    case "FrontPageGroup":
+    case "FrontPageSlider": {
+      const [firstGroupItem] = item.items;
+      return firstGroupItem.__typename === "FrontPageArticle"
+        ? firstGroupItem.article?.urn ?? index.toString()
+        : firstGroupItem.url + index.toString();
+    }
+    default:
+      return index.toString();
+  }
+};
 function keyExtractor(item: ContentItem, index: number): string {
   switch (item.__typename) {
     case "FrontPageArticle":
